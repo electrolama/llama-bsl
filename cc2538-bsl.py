@@ -47,6 +47,8 @@ import os
 import struct
 import binascii
 import traceback
+import io
+import shutil
 
 try:
     import magic
@@ -60,6 +62,18 @@ try:
     have_hex_support = True
 except ImportError:
     have_hex_support = False
+
+try:
+    import requests
+    have_requests = True
+except ImportError:
+    have_requests = False
+
+try:
+    import zipfile
+    have_zipfile = True
+except ImportError:
+    have_zipfile = False
 
 # version
 __version__ = "2.1"
@@ -1018,7 +1032,72 @@ def print_version():
         version = __version__
     print('%s %s' % (sys.argv[0], version))
 
+def download_firmware():
+    # use default index_url unless specified as a parameter
+    if conf['index_url'] is None:
+        #FIXME: change to Koen's repo if/when index.json is introduced
+        conf['index_url'] = "https://raw.githubusercontent.com/electrolama/Z-Stack-firmware/master/index.json"
 
+    # grab and parse index.json from the repo
+    req = requests.get(url=conf['index_url'], timeout = 5)
+    if (req.status_code != 200):
+        raise Exception('Can not download index JSON, aborting')
+    fw_data = req.json()
+
+    # check if fw_stack is specified, if not default to the one spec'd in index.json
+    if conf['fw_stack'] is None:
+        conf['fw_stack'] = fw_data["firmware_type"][conf['fw_role']]["stack_default"]
+
+    fw_config = fw_data["boards"][conf['board_type']]
+
+    # get the latest release for fw_type + fw_stack
+    stack_releases = fw_data["firmware_type"][ conf['fw_role'] ]["stack"]
+    fw_release = None
+    if (len(stack_releases) > 1):
+        for s in stack_releases:
+            for stack, release in s.items():
+                if (stack == conf['fw_stack']):
+                    fw_release = release
+    else:
+        for stack, release in stack_releases:
+            if (stack == conf['fw_stack']):
+                fw_release = release
+
+    mdebug(10, "Firmware release: %s" % fw_release)
+    if fw_release is None:
+        raise Exception("Can not find release for fw_stack specified, aborting.")
+
+    # build firmware download url
+    fw_base = "{}_{}_{}".format(fw_config, conf['fw_role'], fw_release)
+    #FIXME: change to Koen's repo if/when index.json is introduced
+    fw_url = "https://github.com/electrolama/Z-Stack-firmware/blob/master/{}/{}/bin/{}.zip?raw=true".format(conf['fw_role'], conf['fw_stack'], fw_base)
+    mdebug(5, "Firmware download URL: %s" % fw_url)
+
+    # build download_path and remove any stale firmware files that might be lingering around
+    download_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fw-tmp")
+    if os.path.exists(download_path):
+        shutil.rmtree(download_path)
+
+    # download firmware zip file and extract it to download_path
+    req_fw = requests.get(fw_url)
+    fw_zip = zipfile.ZipFile(io.BytesIO(req_fw.content))
+    fw_zip.extractall(download_path)
+
+    # pick the first hex file we see in download_path
+    # this means 1 hex file per each zip file in repo
+    hex_found = False
+    for file in os.listdir(download_path):
+        if file.endswith(".hex"):
+            hex_found = True
+            conf["fw_downloaded"] = os.path.join(download_path, file)
+            break
+
+    if not hex_found:
+        raise Exception("No .hex files found in the downloaded archive, aborting.")
+
+    mdebug(10, "fw_downloaded set to: %s" % conf["fw_downloaded"])
+
+# FIXME: add better description for new options added
 def usage():
     print("""Usage: %s [-DhqVfewvr] [-l length] [-p port] [-b baud] [-a addr] \
     [-i addr] [--bootloader-active-high] [--bootloader-invert-lines] [file.bin]
@@ -1042,6 +1121,11 @@ def usage():
     --bootloader-active-high     Use active high signals to enter bootloader
     --bootloader-invert-lines    Inverts the use of RTS and DTR to enter bootloader
     -D, --disable-bootloader     After finishing, disable the bootloader
+    --board                      Board type, defined in the download index JSON
+    --role                       Firmware role, defined in the download index JSON
+    --stack                      Firmware stack, defined in the download index JSON
+    --download                   Download firmware release for specified board, role and stack
+    --index_url                  Index JSON URL
     --version                    Print script version
 
 Examples:
@@ -1068,7 +1152,13 @@ if __name__ == "__main__":
             'ieee_address': 0,
             'bootloader_active_high': False,
             'bootloader_invert_lines': False,
-            'disable-bootloader': 0
+            'disable-bootloader': 0,
+            'board_type': None,
+            "fw_role": None,
+            "fw_stack": None,
+            "download": False,
+            "fw_downloaded": None,
+            "index_url": None
         }
 
 # http://www.python.org/doc/2.5.2/lib/module-getopt.html
@@ -1079,7 +1169,8 @@ if __name__ == "__main__":
                                    ['help', 'ieee-address=','erase-page=',
                                     'disable-bootloader',
                                     'bootloader-active-high',
-                                    'bootloader-invert-lines', 'version'])
+                                    'bootloader-invert-lines', 'version',
+                                    'board=', 'role=', 'stack=', 'download', 'index_url='])
     except getopt.GetoptError as err:
         # print help information and exit:
         print(str(err))  # will print something like "option -a not recognized"
@@ -1126,6 +1217,16 @@ if __name__ == "__main__":
         elif o == '--version':
             print_version()
             sys.exit(0)
+        elif o == '--board':
+            conf['board_type'] = a
+        elif o == '--role':
+            conf["fw_role"] = a
+        elif o == '--stack':
+            conf["fw_stack"] = a
+        elif o == "--download":
+            conf["download"] = 1
+        elif o == '--index_url':
+            conf["index_url"] = a
         else:
             assert False, "Unhandled option"
 
@@ -1134,7 +1235,8 @@ if __name__ == "__main__":
         # check for input/output file
         if conf['write'] or conf['read'] or conf['verify']:
             try:
-                args[0]
+                if not conf["download"]: # skip this check if we are downloading a firmware
+                    args[0]
             except:
                 raise Exception('No file path given.')
 
@@ -1156,6 +1258,17 @@ if __name__ == "__main__":
         if conf['len'] < 0:
             raise Exception('Length must be positive but %d was provided'
                             % (conf['len'],))
+        
+        if conf["download"]:
+            # do we have the necesary modules to be able to download an unzip firmware?
+            if not have_requests and have_zipfile:
+                raise Exception("Please install Python modules requests and zipfile for the download option to work.")
+
+            # do we know what board type and firmware role we are downloading for?
+            if not conf['board_type'] and not conf["fw_role"]:
+                raise Exception('Board type and firmware role need to be specified for the download option to work.')
+
+            download_firmware()
 
         # Try and find the port automatically
         if conf['port'] == 'auto':
@@ -1184,8 +1297,13 @@ if __name__ == "__main__":
         mdebug(5, "Opening port %(port)s, baud %(baud)d"
                % {'port': conf['port'], 'baud': conf['baud']})
         if conf['write'] or conf['verify']:
-            mdebug(5, "Reading data from %s" % args[0])
-            firmware = FirmwareFile(args[0])
+            # use specified firmware file if we have not downloaded any
+            if conf["fw_downloaded"] == None:
+                mdebug(5, "Reading data from %s" % args[0])
+                firmware = FirmwareFile(args[0])
+            else:
+                mdebug(5, "Using downloaded firmware %s" % conf["fw_downloaded"])
+                firmware = FirmwareFile(conf["fw_downloaded"])
 
         mdebug(5, "Connecting to target...")
 

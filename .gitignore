@@ -16,3 +16,12 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *,cover
+
+# Stale firmware downloads
+fw-tmp/
+
+# Dist build
+dist/
+llama_bsl.egg-info
+llama-bsl-*/
+

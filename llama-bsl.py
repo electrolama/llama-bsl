@@ -1035,8 +1035,7 @@ def print_version():
 def download_firmware():
     # use default index_url unless specified as a parameter
     if conf['index_url'] is None:
-        #FIXME: change to Koen's repo if/when index.json is introduced
-        conf['index_url'] = "https://raw.githubusercontent.com/electrolama/Z-Stack-firmware/master/index.json"
+        conf['index_url'] = "https://raw.githubusercontent.com/Koenkk/Z-Stack-firmware/master/index.json"
 
     # grab and parse index.json from the repo
     req = requests.get(url=conf['index_url'], timeout = 5)
@@ -1069,8 +1068,7 @@ def download_firmware():
 
     # build firmware download url
     fw_base = "{}_{}_{}".format(fw_config, conf['fw_role'], fw_release)
-    #FIXME: change to Koen's repo if/when index.json is introduced
-    fw_url = "https://github.com/electrolama/Z-Stack-firmware/blob/master/{}/{}/bin/{}.zip?raw=true".format(conf['fw_role'], conf['fw_stack'], fw_base)
+    fw_url = "https://github.com/Koenkk/Z-Stack-firmware/blob/master/{}/{}/bin/{}.zip?raw=true".format(conf['fw_role'], conf['fw_stack'], fw_base)
     mdebug(5, "Firmware download URL: %s" % fw_url)
 
     # build download_path and remove any stale firmware files that might be lingering around

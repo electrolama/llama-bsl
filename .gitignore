@@ -25,3 +25,5 @@ dist/
 llama_bsl.egg-info
 llama-bsl-*/
 
+# venv
+venv/

@@ -1,4 +1,4 @@
-PYTHON ?= python
+PYTHON ?= python3
 
 build:
 	@$(PYTHON) -m build
@@ -10,7 +10,10 @@ release-test: build
 	@$(PYTHON) -m twine upload --repository testpypi dist/*
 
 dist-clean:
-	rmdir /s dist
+	rm -rf dist
+
+pip-uninstall:
+	@$(PYTHON) -m pip uninstall llama-bsl
 
 pip-install:
 	@$(PYTHON) -m pip install llama-bsl
@@ -18,11 +21,12 @@ pip-install:
 pip-install-test:
 	@$(PYTHON) -m pip install --index-url https://test.pypi.org/simple/ llama-bsl
 
-pip-uninstall:
-	@$(PYTHON) -m pip uninstall llama-bsl
-
 new-env:
 	@$(PYTHON) -m venv venv
 
 del-env:
-	rmdir /s venv
+	rm -rf venv
+
+install-build-dep:
+	sudo @$(PYTHON) -m pip install virtualenv build wheel twine
+

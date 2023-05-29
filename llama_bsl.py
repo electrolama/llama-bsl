@@ -1132,8 +1132,143 @@ Examples:
 
     """ % (sys.argv[0], sys.argv[0], sys.argv[0]))
 
+
+def run(conf):
+    cmd = CommandInterface()
+    cmd.open(conf['port'], conf['baud'])
+    cmd.invoke_bootloader(conf['bootloader_active_high'],
+                            conf['bootloader_invert_lines'])
+    mdebug(5, "Opening port %(port)s, baud %(baud)d"
+            % {'port': conf['port'], 'baud': conf['baud']})
+    if conf['write'] or conf['verify']:
+        # use specified firmware file if we have not downloaded any
+        if conf["fw_downloaded"] == None:
+            mdebug(5, "Reading data from %s" % args[0])
+            firmware = FirmwareFile(args[0])
+        else:
+            mdebug(5, "Using downloaded firmware %s" % conf["fw_downloaded"])
+            firmware = FirmwareFile(conf["fw_downloaded"])
+
+    mdebug(5, "Connecting to target...")
+
+    if not cmd.sendSynch():
+        raise CmdException("Can't connect to target. Ensure boot loader "
+                            "is started. (no answer on synch sequence)")
+
+    # if (cmd.cmdPing() != 1):
+    #     raise CmdException("Can't connect to target. Ensure boot loader "
+    #                        "is started. (no answer on ping command)")
+
+    chip_id = cmd.cmdGetChipId()
+    chip_id_str = CHIP_ID_STRS.get(chip_id, None)
+
+    if chip_id_str == None:
+        mdebug(10, '    Unrecognized chip ID. Trying CC13xx/CC26xx')
+        device = CC26xx(cmd)
+    else:
+        mdebug(10, "    Target id 0x%x, %s" % (chip_id, chip_id_str))
+        device = CC2538(cmd)
+
+    # Choose a good default address unless the user specified -a
+    if conf['address'] == None:
+        conf['address'] = device.flash_start_addr
+
+    if conf['force_speed'] != 1 and device.has_cmd_set_xosc:
+        if cmd.cmdSetXOsc():  # switch to external clock source
+            cmd.close()
+            conf['baud'] = 1000000
+            cmd.open(conf['port'], conf['baud'])
+            mdebug(6, "Opening port %(port)s, baud %(baud)d"
+                    % {'port': conf['port'], 'baud': conf['baud']})
+            mdebug(6, "Reconnecting to target at higher speed...")
+            if (cmd.sendSynch() != 1):
+                raise CmdException("Can't connect to target after clock "
+                                    "source switch. (Check external "
+                                    "crystal)")
+        else:
+            raise CmdException("Can't switch target to external clock "
+                                "source. (Try forcing speed)")
+
+    if conf['erase']:
+        mdebug(5, "    Performing mass erase")
+        if device.erase():
+            mdebug(5, "    Erase done")
+        else:
+            raise CmdException("Erase failed")
+
+    if conf['erase_page']:
+        erase_range = parse_page_address_range(device, conf['erase_page'])
+        mdebug(5, "Erasing %d bytes at addres 0x%x"
+                % (erase_range[1], erase_range[0]))
+        cmd.cmdEraseMemory(erase_range[0], erase_range[1])
+        mdebug(5, "    Partial erase done                  ")
+
+    if conf['write']:
+        # TODO: check if boot loader back-door is open, need to read
+        #       flash size first to get address
+        if cmd.writeMemory(conf['address'], firmware.bytes):
+            mdebug(5, "    Write done                                ")
+        else:
+            raise CmdException("Write failed                       ")
+
+    if conf['verify']:
+        mdebug(5, "Verifying by comparing CRC32 calculations.")
+
+        crc_local = firmware.crc32()
+        # CRC of target will change according to length input file
+        crc_target = device.crc(conf['address'], len(firmware.bytes))
+
+        if crc_local == crc_target:
+            mdebug(5, "    Verified (match: 0x%08x)" % crc_local)
+        else:
+            cmd.cmdReset()
+            raise Exception("NO CRC32 match: Local = 0x%x, "
+                            "Target = 0x%x" % (crc_local, crc_target))
+
+    if conf['ieee_address'] != 0:
+        ieee_addr = parse_ieee_address(conf['ieee_address'])
+        mdebug(5, "Setting IEEE address to %s"
+                    % (':'.join(['%02x' % b
+                                for b in struct.pack('>Q', ieee_addr)])))
+        ieee_addr_bytes = struct.pack('<Q', ieee_addr)
+
+        if cmd.writeMemory(device.addr_ieee_address_secondary,
+                            ieee_addr_bytes):
+            mdebug(5, "    "
+                        "Set address done                                ")
+        else:
+            raise CmdException("Set address failed                       ")
+
+    if conf['read']:
+        length = conf['len']
+
+        # Round up to a 4-byte boundary
+        length = (length + 3) & ~0x03
+
+        mdebug(5, "Reading %s bytes starting at address 0x%x"
+                % (length, conf['address']))
+        with open(args[0], 'wb') as f:
+            for i in range(0, length >> 2):
+                # reading 4 bytes at a time
+                rdata = device.read_memory(conf['address'] + (i * 4))
+                mdebug(5, " 0x%x: 0x%02x%02x%02x%02x"
+                        % (conf['address'] + (i * 4), rdata[0], rdata[1],
+                            rdata[2], rdata[3]), '\r')
+                f.write(rdata)
+            f.close()
+        mdebug(5, "    Read done                                ")
+
+    if conf['disable-bootloader']:
+        device.disable_bootloader()
+
+    cmd.cmdReset()
+
+
 if __name__ == "__main__":
 
+    # Build up the conf dictionary from the command line arguments
+
+    # Start with the defaults
     conf = {
             'port': 'auto',
             'baud': 500000,
@@ -1159,8 +1294,7 @@ if __name__ == "__main__":
             "index_url": None
         }
 
-# http://www.python.org/doc/2.5.2/lib/module-getopt.html
-
+    # Try parsing the command line arguments
     try:
         opts, args = getopt.getopt(sys.argv[1:],
                                    "DhqVfeE:wvrp:b:a:l:i:",
@@ -1287,135 +1421,9 @@ if __name__ == "__main__":
                 conf['port'] = ports[0]
             else:
                 raise Exception('No serial port found.')
-
-        cmd = CommandInterface()
-        cmd.open(conf['port'], conf['baud'])
-        cmd.invoke_bootloader(conf['bootloader_active_high'],
-                              conf['bootloader_invert_lines'])
-        mdebug(5, "Opening port %(port)s, baud %(baud)d"
-               % {'port': conf['port'], 'baud': conf['baud']})
-        if conf['write'] or conf['verify']:
-            # use specified firmware file if we have not downloaded any
-            if conf["fw_downloaded"] == None:
-                mdebug(5, "Reading data from %s" % args[0])
-                firmware = FirmwareFile(args[0])
-            else:
-                mdebug(5, "Using downloaded firmware %s" % conf["fw_downloaded"])
-                firmware = FirmwareFile(conf["fw_downloaded"])
-
-        mdebug(5, "Connecting to target...")
-
-        if not cmd.sendSynch():
-            raise CmdException("Can't connect to target. Ensure boot loader "
-                               "is started. (no answer on synch sequence)")
-
-        # if (cmd.cmdPing() != 1):
-        #     raise CmdException("Can't connect to target. Ensure boot loader "
-        #                        "is started. (no answer on ping command)")
-
-        chip_id = cmd.cmdGetChipId()
-        chip_id_str = CHIP_ID_STRS.get(chip_id, None)
-
-        if chip_id_str == None:
-            mdebug(10, '    Unrecognized chip ID. Trying CC13xx/CC26xx')
-            device = CC26xx(cmd)
-        else:
-            mdebug(10, "    Target id 0x%x, %s" % (chip_id, chip_id_str))
-            device = CC2538(cmd)
-
-        # Choose a good default address unless the user specified -a
-        if conf['address'] == None:
-            conf['address'] = device.flash_start_addr
-
-        if conf['force_speed'] != 1 and device.has_cmd_set_xosc:
-            if cmd.cmdSetXOsc():  # switch to external clock source
-                cmd.close()
-                conf['baud'] = 1000000
-                cmd.open(conf['port'], conf['baud'])
-                mdebug(6, "Opening port %(port)s, baud %(baud)d"
-                       % {'port': conf['port'], 'baud': conf['baud']})
-                mdebug(6, "Reconnecting to target at higher speed...")
-                if (cmd.sendSynch() != 1):
-                    raise CmdException("Can't connect to target after clock "
-                                       "source switch. (Check external "
-                                       "crystal)")
-            else:
-                raise CmdException("Can't switch target to external clock "
-                                   "source. (Try forcing speed)")
-
-        if conf['erase']:
-            mdebug(5, "    Performing mass erase")
-            if device.erase():
-                mdebug(5, "    Erase done")
-            else:
-                raise CmdException("Erase failed")
-
-        if conf['erase_page']:
-            erase_range = parse_page_address_range(device, conf['erase_page'])
-            mdebug(5, "Erasing %d bytes at addres 0x%x"
-                   % (erase_range[1], erase_range[0]))
-            cmd.cmdEraseMemory(erase_range[0], erase_range[1])
-            mdebug(5, "    Partial erase done                  ")
-
-        if conf['write']:
-            # TODO: check if boot loader back-door is open, need to read
-            #       flash size first to get address
-            if cmd.writeMemory(conf['address'], firmware.bytes):
-                mdebug(5, "    Write done                                ")
-            else:
-                raise CmdException("Write failed                       ")
-
-        if conf['verify']:
-            mdebug(5, "Verifying by comparing CRC32 calculations.")
-
-            crc_local = firmware.crc32()
-            # CRC of target will change according to length input file
-            crc_target = device.crc(conf['address'], len(firmware.bytes))
-
-            if crc_local == crc_target:
-                mdebug(5, "    Verified (match: 0x%08x)" % crc_local)
-            else:
-                cmd.cmdReset()
-                raise Exception("NO CRC32 match: Local = 0x%x, "
-                                "Target = 0x%x" % (crc_local, crc_target))
-
-        if conf['ieee_address'] != 0:
-            ieee_addr = parse_ieee_address(conf['ieee_address'])
-            mdebug(5, "Setting IEEE address to %s"
-                       % (':'.join(['%02x' % b
-                                    for b in struct.pack('>Q', ieee_addr)])))
-            ieee_addr_bytes = struct.pack('<Q', ieee_addr)
-
-            if cmd.writeMemory(device.addr_ieee_address_secondary,
-                               ieee_addr_bytes):
-                mdebug(5, "    "
-                          "Set address done                                ")
-            else:
-                raise CmdException("Set address failed                       ")
-
-        if conf['read']:
-            length = conf['len']
-
-            # Round up to a 4-byte boundary
-            length = (length + 3) & ~0x03
-
-            mdebug(5, "Reading %s bytes starting at address 0x%x"
-                   % (length, conf['address']))
-            with open(args[0], 'wb') as f:
-                for i in range(0, length >> 2):
-                    # reading 4 bytes at a time
-                    rdata = device.read_memory(conf['address'] + (i * 4))
-                    mdebug(5, " 0x%x: 0x%02x%02x%02x%02x"
-                           % (conf['address'] + (i * 4), rdata[0], rdata[1],
-                              rdata[2], rdata[3]), '\r')
-                    f.write(rdata)
-                f.close()
-            mdebug(5, "    Read done                                ")
-
-        if conf['disable-bootloader']:
-            device.disable_bootloader()
-
-        cmd.cmdReset()
+            
+        # Pass the config to run(), to invoke the CommandInterface
+        run(conf)
 
     except Exception as err:
         if QUIET >= 10:

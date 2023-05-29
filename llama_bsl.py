@@ -1143,8 +1143,8 @@ def run(conf):
     if conf['write'] or conf['verify']:
         # use specified firmware file if we have not downloaded any
         if conf["fw_downloaded"] == None:
-            mdebug(5, "Reading data from %s" % args[0])
-            firmware = FirmwareFile(args[0])
+            mdebug(5, "Reading data from %s" % conf['fw_file'])
+            firmware = FirmwareFile(conf['fw_file'])
         else:
             mdebug(5, "Using downloaded firmware %s" % conf["fw_downloaded"])
             firmware = FirmwareFile(conf["fw_downloaded"])
@@ -1247,7 +1247,7 @@ def run(conf):
 
         mdebug(5, "Reading %s bytes starting at address 0x%x"
                 % (length, conf['address']))
-        with open(args[0], 'wb') as f:
+        with open(conf['fw_file'], 'wb') as f:
             for i in range(0, length >> 2):
                 # reading 4 bytes at a time
                 rdata = device.read_memory(conf['address'] + (i * 4))
@@ -1291,6 +1291,7 @@ if __name__ == "__main__":
             "fw_stack": None,
             "download": False,
             "fw_downloaded": None,
+            "fw_file": None,
             "index_url": None
         }
 
@@ -1368,7 +1369,7 @@ if __name__ == "__main__":
         if conf['write'] or conf['read'] or conf['verify']:
             try:
                 if not conf["download"]: # skip this check if we are downloading a firmware
-                    args[0]
+                    conf['fw_file'] = args[0]
             except:
                 raise Exception('No file path given.')
 

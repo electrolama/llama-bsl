@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="llama-bsl",
-    version="v0.4",
+    version="v0.5",
     description="Script to communicate with Texas Instruments CC13xx/CC2538/CC26xx Serial Boot Loader (Fork of cc2538-bsl.py)",
     long_description=open("README.md", encoding="utf-8").read(),
     keywords="cc2538, cc1310, cc13xx, bootloader, cc26xx, cc2650, cc2640",
@@ -25,5 +25,9 @@ setup(
     python_requires=">=3.4",
     setup_requires=["setuptools_scm"],
     install_requires=["pip>=10", "setuptools", "wheel", "pyserial==3.5", "intelhex==2.3.0", "requests==2.26.0"],
-    scripts=["llama-bsl.py"],
+    entry_points={
+        'console_scripts': [
+            'llama-bsl=llama_bsl:main',
+        ],
+    },
 )

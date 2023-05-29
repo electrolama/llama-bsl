@@ -1264,10 +1264,8 @@ def run(conf):
     cmd.cmdReset()
 
 
-if __name__ == "__main__":
-
+def main():
     # Build up the conf dictionary from the command line arguments
-
     # Start with the defaults
     conf = {
             'port': 'auto',
@@ -1309,6 +1307,9 @@ if __name__ == "__main__":
         print(str(err))  # will print something like "option -a not recognized"
         usage()
         sys.exit(2)
+
+    # default verbosity is quiet.
+    QUIET = 0
 
     for o, a in opts:
         if o == '-V':
@@ -1430,3 +1431,7 @@ if __name__ == "__main__":
         if QUIET >= 10:
             traceback.print_exc()
         exit('ERROR: %s' % str(err))
+
+
+if __name__ == "__main__":
+    main()

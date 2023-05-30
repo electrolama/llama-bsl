@@ -1068,7 +1068,7 @@ def print_version():
     print("%s %s" % (sys.argv[0], version))
 
 
-def download_firmware():
+def download_firmware(conf):
     # use default index_url unless specified as a parameter
     if conf["index_url"] is None:
         conf[
@@ -1501,7 +1501,7 @@ def main():
                     "Board type and firmware role need to be specified for the download option to work."
                 )
 
-            download_firmware()
+            download_firmware(conf)
 
         # Try and find the port automatically
         if conf["port"] == "auto":

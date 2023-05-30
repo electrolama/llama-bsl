@@ -1,6 +1,12 @@
-PYTHON ?= python3
+PYTHON ?= python
 
-build:
+ifeq ($(OS),Windows_NT)
+    RM = powershell Remove-Item -Recurse -Force -ErrorAction Ignore
+else
+    RM = rm -rf
+endif
+
+build: dist-clean
 	@$(PYTHON) -m build
 
 release: build
@@ -10,7 +16,8 @@ release-test: build
 	@$(PYTHON) -m twine upload --repository testpypi dist/*
 
 dist-clean:
-	rm -rf dist
+#	echo here is just so Remove-Item's return code is ignored. 
+	$(RM) dist/, build/, llama_bsl.egg-info/, llama-bsl-*/ || echo "."
 
 pip-uninstall:
 	@$(PYTHON) -m pip uninstall llama-bsl
@@ -21,12 +28,12 @@ pip-install:
 pip-install-test:
 	@$(PYTHON) -m pip install --index-url https://test.pypi.org/simple/ llama-bsl
 
-new-env:
-	@$(PYTHON) -m venv venv
-
 del-env:
-	rm -rf venv
+#	echo here is just so Remove-Item's return code is ignored. 
+	$(RM) venv/ || echo "."
+
+new-env: del-env
+	@$(PYTHON) -m venv venv
 
 install-build-dep:
 	sudo @$(PYTHON) -m pip install virtualenv build wheel twine
-

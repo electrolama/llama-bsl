@@ -24,10 +24,17 @@ setup(
     platforms="posix",
     python_requires=">=3.4",
     setup_requires=["setuptools_scm"],
-    install_requires=["pip>=10", "setuptools", "wheel", "pyserial==3.5", "intelhex==2.3.0", "requests==2.26.0"],
+    install_requires=[
+        "pip>=10",
+        "setuptools",
+        "wheel",
+        "pyserial==3.5",
+        "intelhex==2.3.0",
+        "requests==2.26.0",
+    ],
     entry_points={
-        'console_scripts': [
-            'llama-bsl=llama_bsl:main',
+        "console_scripts": [
+            "llama-bsl=llama_bsl:main",
         ],
     },
 )

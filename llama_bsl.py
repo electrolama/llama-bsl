@@ -152,7 +152,7 @@ class FirmwareFile(object):
         if have_magic:
             file_type = magic.from_file(path, mime=True)
 
-            if file_type == "text/plain":
+            if file_type == "text/plain" or file_type == "text/x-hex":
                 firmware_is_hex = True
                 mdebug(5, "Firmware file: Intel Hex")
             elif file_type == "application/octet-stream":
